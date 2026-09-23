@@ -1,0 +1,72 @@
+// board A. Com 5
+#include <WiFi.h>
+#include <esp_now.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_W 128
+#define SCREEN_H 64
+#define VIRTUAL_W 256   // 2 screens wide
+
+Adafruit_SSD1306 display(SCREEN_W, SCREEN_H, &Wire, -1);
+
+uint8_t broadcastMAC[] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+
+typedef struct { float x, y, vx, vy; uint8_t magic; } CubePacket;
+CubePacket cube = { 10, 32, 2.5f, 1.7f, 0x42 };
+
+const int CUBE = 8;
+
+void onSent(const wifi_tx_info_t *info, esp_now_send_status_t status) {
+  // optional: debug
+}
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin(7, 6);
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+  display.clearDisplay();
+  display.display();
+
+  WiFi.mode(WIFI_STA);
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("ESP-NOW init failed");
+    return;
+  }
+  esp_now_register_send_cb(onSent);
+
+  esp_now_peer_info_t peer = {};
+  memcpy(peer.peer_addr, broadcastMAC, 6);
+  peer.channel = 0;
+  peer.encrypt = false;
+  if (esp_now_add_peer(&peer) != ESP_OK) {
+    Serial.println("add_peer failed");
+  }
+}
+
+void loop() {
+  // --- physics ---
+  cube.x += cube.vx;
+  cube.y += cube.vy;
+
+  // bounce off top/bottom
+  if (cube.y < 0)              { cube.y = 0;              cube.vy = -cube.vy; }
+  if (cube.y > SCREEN_H-CUBE)  { cube.y = SCREEN_H-CUBE;  cube.vy = -cube.vy; }
+
+  // bounce off far left/right of the VIRTUAL canvas
+  if (cube.x < 0)                    { cube.x = 0;                    cube.vx = -cube.vx; }
+  if (cube.x > VIRTUAL_W-CUBE)       { cube.x = VIRTUAL_W-CUBE;       cube.vx = -cube.vx; }
+
+  // --- broadcast ---
+  esp_now_send(broadcastMAC, (uint8_t*)&cube, sizeof(cube));
+
+  // --- draw only if cube is in OUR half (0..127) ---
+  display.clearDisplay();
+  if (cube.x >= 0 && cube.x < SCREEN_W) {
+    display.fillRect((int)cube.x, (int)cube.y, CUBE, CUBE, SSD1306_WHITE);
+  }
+  display.display();
+
+  delay(20); // ~50 fps
+}
