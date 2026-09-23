@@ -1,0 +1,53 @@
+//board B.Com 11
+#include <WiFi.h>
+#include <esp_now.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_W 128
+#define SCREEN_H 64
+#define VIRTUAL_W 256
+
+Adafruit_SSD1306 display(SCREEN_W, SCREEN_H, &Wire, -1);
+
+typedef struct { float x, y, vx, vy; uint8_t magic; } CubePacket;
+CubePacket cube = { 200, 32, 0, 0, 0 };
+
+const int CUBE = 8;
+
+void onReceive(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  if (len != sizeof(CubePacket)) return;
+  CubePacket *p = (CubePacket*)data;
+  if (p->magic != 0x42) return;   // ignore our own echoes / junk
+  cube = *p;
+}
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin(7, 6);
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+  display.clearDisplay();
+  display.display();
+
+  WiFi.mode(WIFI_STA);
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("ESP-NOW init failed");
+    return;
+  }
+  esp_now_register_recv_cb(onReceive);
+  // no peer add needed for receive-only — but harmless to add:
+}
+
+void loop() {
+  display.clearDisplay();
+
+  // translate virtual x -> local x (subtract 128)
+  float localX = cube.x - SCREEN_W;
+  if (localX >= -CUBE && localX < SCREEN_W) {
+    display.fillRect((int)localX, (int)cube.y, CUBE, CUBE, SSD1306_WHITE);
+  }
+
+  display.display();
+  delay(10);
+}
